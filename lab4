@@ -246,5 +246,4 @@ int main()
 		MenuChoice(&check_exit);
 	}
 	return 0;
-
 }
