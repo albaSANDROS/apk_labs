@@ -12,9 +12,6 @@
 #define Cd6 1109
 #define Dd6 1245
 
-const unsigned long int maxValue = 1193180;
-
-const unsigned int timesToRepeate = 30000;
 
 
 //channel must be 0, 1 or 2 only
@@ -125,40 +122,42 @@ void newrandom()
 {
 	int delim = 0;
 	int speakerWasOn = 0;
-	unsigned int maxNum = 0;
+	
+	long maxNum = 0;
 
 	printf("Input max random number, please\n");
 	scanf("%u", &maxNum);
-
-	//clear buffer
-	while (getchar() != '\n');
 	
-	if (maxNum!=0){
-	outp(0x43, 0xB4);						//10(channel 2) 11(RW lower, than higher) 010(mode 2: with autoloading) 0 (binary)
-	outp(0x42, maxNum % 0x100);
-	outp(0x42, maxNum / 0x100);
+		//
+		//clear buffer
+		while (getchar() != '\n');
 
-	//включаем только канал
-	delim = inp(0x61);
-	speakerWasOn = delim & 0x01;
-	outp(0x61, delim | 0x01);
+		//clear buffer
 
-	printf("Press Enter go generate number\n");
-	getchar();
+		if (maxNum > 0){
+			outp(0x43, 0xB4);						//10(channel 2) 11(RW lower, than higher) 010(mode 2: with autoloading) 0 (binary)
+			outp(0x42, maxNum % 256);
+			outp(0x42, maxNum / 256);
 
-	printf("Your number is: %u", getCE(2));
+			//включаем только канал
+			delim = inp(0x61);
+			speakerWasOn = delim & 0x01;
+			outp(0x61, delim | 0x01);
 
-	//выключаем только канал, если нужно
-	delim = inp(0x61);
-	speakerWasOn |= 0xFFFE;									//все биты, кроме последнего
+			printf("Press Enter go generate number\n");
+			getchar();
+
+			printf("Your number is: %u", getCE(2));
+
+			//выключаем только канал, если нужно
+			delim = inp(0x61);
+			speakerWasOn |= 0xFFFE;									//все биты, кроме последнего
+
+			outp(0x61, delim & speakerWasOn);
+		}
+		else printf("wrong num\n");
 	
-	outp(0x61, delim & speakerWasOn);
 }
-else printf("wrong num\n");
-}
-
-
-
 
 void SoundGeneration() {
 
@@ -184,19 +183,68 @@ void SoundGeneration() {
 	}
 }
 
+void Menu(void) {
+	printf("\n1. Play sound");
+	printf("\n2. Print channels kd");
+	printf("\n3. Print state words");
+	printf("\n4. Get random digit");
+	printf("\n5. Exit.");
+	printf("\n\nEnter choice: ");
+	return;
+}
+
+void MenuChoice(int *number) {
+	for (;;) {
+		while (scanf("%d", number) != 1) {
+			printf("\nIncorrect input. Enter only digits: ");
+			while (getchar() != '\n');
+			continue;
+		}
+		if (*number != 1 && *number != 2 && *number != 3
+			&& *number != 4 && *number != 5 && *number != 6) {
+			printf("\nIncorrect input. Choose one of points in menu: ");
+			continue;
+		}
+		if (getchar() != '\n') {
+			printf("\nIncorrect input. Enter only digits: ");
+			while (getchar() != '\n');
+			continue;
+		}
+		else {
+			break;
+		}
+	}
+	return;
+}
+
 int main()
 {
-	printf("Start values:\n");
-	printStateWords();
-	printDelims();
-
-	SoundGeneration();
-	outp(0x61, inp(0x61) & 0xFC);//turn off
-
-	printf("\nEnd values:\n");
-	printStateWords();
-	printDelims();
-
-	newrandom();
+	int check_exit = 0;
+	Menu();
+	MenuChoice(&check_exit);
+	while (check_exit != 5) {
+		switch (check_exit) {
+		case 1: {
+					SoundGeneration();
+					break;
+		}
+		case 2: {
+					printDelims();
+					break;
+		}
+		case 3: {
+					printStateWords();
+					break;
+		}
+		case 4: {
+					newrandom();
+					break;			
+		}
+		}
+		check_exit = 0;
+		Menu();
+		MenuChoice(&check_exit);
+	}
 	return 0;
+
 }
