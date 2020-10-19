@@ -1,0 +1,215 @@
+#define _SCL_SECURE_NO_WARNINGS
+#include <cstdio>
+#include <windows.h>
+#include <conio.h>
+#include <ctime>
+#include <iostream>
+#include <string>
+#include <cstdlib>
+
+
+using namespace std;
+
+//максимальный период простоя для операций чтения/записи
+
+void Server(char* path)
+{
+	STARTUPINFO si;															
+	ZeroMemory(&si, sizeof(si));
+	si.cb = sizeof(si);
+
+	PROCESS_INFORMATION COM2_PROC_INFO;										
+	ZeroMemory(&COM2_PROC_INFO, sizeof(COM2_PROC_INFO));
+
+	HANDLE Receiver_COM1;
+	HANDLE Semaphores[3];
+
+	char buffer[20];			
+	int bufferSize = sizeof(buffer);
+
+	string message;
+
+	cout << "This is server (COM1)\n";
+
+	Semaphores[0] = CreateSemaphore(NULL, 0, 1, "SEMAPHORE");				// Семафор выполнения.
+	Semaphores[1] = CreateSemaphore(NULL, 0, 1, "SEMAPHORE_END");			// Семафор завершения.
+	Semaphores[2] = CreateSemaphore(NULL, 0, 1, "SEMAPHORE_EXIT");			// Семафор выхода.
+	
+	string name = "COM1";
+	Receiver_COM1 = CreateFile(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL,	OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+	CreateProcess(path, (LPSTR)" COM2", NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &COM2_PROC_INFO);
+
+	SetCommMask(Receiver_COM1, EV_RXCHAR);									// Устанавливаем маску на события порта.
+	SetupComm(Receiver_COM1, 1500, 1500);									// Инициализирует коммуникационные параметры для заданного устройства (Дескриптор, буфер ввода-вывода)
+
+	COMMTIMEOUTS CommTimeOuts;								// Структура, характеризующая временные параметры последовательного порта.
+	CommTimeOuts.ReadIntervalTimeout = 0xFFFFFFFF;			
+	CommTimeOuts.ReadTotalTimeoutMultiplier = 0;			
+	CommTimeOuts.ReadTotalTimeoutConstant = 1200;	
+	CommTimeOuts.WriteTotalTimeoutMultiplier = 0;			
+	CommTimeOuts.WriteTotalTimeoutConstant = 1200;	
+
+	if (!SetCommTimeouts(Receiver_COM1, &CommTimeOuts))
+	{
+		CloseHandle(Receiver_COM1);
+		Receiver_COM1 = INVALID_HANDLE_VALUE;
+		return;
+	}
+
+	DCB COM_DCB;										// Структура, характеризующая основные параметры последовательного порта. 
+	memset(&COM_DCB, 0, sizeof(COM_DCB));				
+	COM_DCB.DCBlength = sizeof(DCB);					
+	GetCommState(Receiver_COM1, &COM_DCB);				
+	COM_DCB.BaudRate = DWORD(9600);						
+	COM_DCB.ByteSize = 8;								
+	COM_DCB.Parity = NOPARITY;							
+	COM_DCB.StopBits = ONESTOPBIT;						
+	COM_DCB.fAbortOnError = TRUE;						
+	COM_DCB.fDtrControl = DTR_CONTROL_DISABLE;			
+	COM_DCB.fRtsControl = RTS_CONTROL_DISABLE;			
+	COM_DCB.fBinary = TRUE;								
+	COM_DCB.fParity = FALSE;							
+	COM_DCB.fInX = FALSE;								
+	COM_DCB.fOutX = FALSE;								
+	COM_DCB.XonChar = 0;								
+	COM_DCB.XoffChar = (unsigned char)0xFF;				
+	COM_DCB.fErrorChar = FALSE;							
+	COM_DCB.fNull = FALSE;								
+	COM_DCB.fOutxCtsFlow = FALSE;						
+	COM_DCB.fOutxDsrFlow = FALSE;						
+	COM_DCB.XonLim = 128;								
+	COM_DCB.XoffLim = 128;								
+
+	//обработка ошибки
+	if (!SetCommState(Receiver_COM1, &COM_DCB))
+	{
+		CloseHandle(Receiver_COM1);
+		Receiver_COM1 = INVALID_HANDLE_VALUE;
+		return;
+	}
+
+	// Цикл передачи cообщения
+	cout << "Write -exit- to leave programm\n" << endl;
+	while (true)
+	{
+		DWORD AmountOfBytes;
+
+		cout << "- ";
+		cin.clear();
+		getline(cin, message);
+
+		if (message == "exit"|| message=="EXIT")
+		{																	// Условие выхода из программы.
+			ReleaseSemaphore(Semaphores[2], 1, NULL);						// Реализация семафора выхода (Ставим в сигнальное состояние).
+			WaitForSingleObject(COM2_PROC_INFO.hProcess, INFINITE);		// Ожидание сигнала от дочернего процесса.
+			break;
+		}
+
+		ReleaseSemaphore(Semaphores[0], 1, NULL);							// Реализация семафора выполения (Ставим в сигнальное состояние).
+
+		int AmountOfBlocks = message.size() / bufferSize + 1;				//количество блоков передаваемой инфы
+		WriteFile(Receiver_COM1, &AmountOfBlocks, sizeof(AmountOfBlocks), &AmountOfBytes, NULL);
+
+		int size = message.size();
+		WriteFile(Receiver_COM1, &size, sizeof(size), &AmountOfBytes, NULL);
+
+		for (int i = 0; i < AmountOfBlocks; i++)
+		{
+			message.copy(buffer, bufferSize, i*bufferSize);
+			if (!WriteFile(Receiver_COM1, buffer, bufferSize, &AmountOfBytes, NULL))
+				cout << "Error.";
+		}
+		WaitForSingleObject(Semaphores[1], INFINITE);						// Ожидание перехода в несигнальное состояние.
+		puts("\nMessage is sended\n");
+	}
+
+	CloseHandle(Receiver_COM1);
+	CloseHandle(Semaphores[0]);
+	CloseHandle(Semaphores[1]);
+	cout << "\n";
+	system("pause");
+	return;
+}
+
+void Client()
+{
+	HANDLE Receiver_COM2;
+	HANDLE Semaphores[3];
+
+	char buffer[20];
+	int bufferSize = sizeof(buffer);
+
+	string message;
+	string name = "COM2";
+
+	bool successFlag;
+	Semaphores[0] = OpenSemaphore(SEMAPHORE_ALL_ACCESS, TRUE, "SEMAPHORE");
+	Semaphores[1] = OpenSemaphore(SEMAPHORE_ALL_ACCESS, TRUE, "SEMAPHORE_END");
+	Semaphores[2] = OpenSemaphore(SEMAPHORE_ALL_ACCESS, TRUE, "SEMAPHORE_EXIT");
+
+	cout << "This is client (COM2)\n";
+
+	//Передатчик информации
+	Receiver_COM2 = CreateFile(name.c_str(), GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+	while (true)
+	{
+		successFlag = TRUE;
+		DWORD AmountOfBytes;
+		message.clear();
+
+		int SemaphoreIndex = WaitForMultipleObjects(3, Semaphores, FALSE, INFINITE) - WAIT_OBJECT_0;
+		if (SemaphoreIndex == 2)
+		{
+			break;
+		}
+
+		int AmountOfBlocks;
+		if (!ReadFile(Receiver_COM2, &AmountOfBlocks, sizeof(AmountOfBlocks), &AmountOfBytes, NULL)) break;
+
+		int size;
+		if (!ReadFile(Receiver_COM2, &size, sizeof(size), &AmountOfBytes, NULL)) break;
+
+		for (int i = 0; i < AmountOfBlocks; i++)
+		{
+			successFlag = ReadFile(Receiver_COM2, buffer, bufferSize, &AmountOfBytes, NULL);
+			if (!successFlag)
+			{
+				break;
+			}
+			message.append(buffer, bufferSize);
+		}
+		puts("\nWe got new message\n");
+		if (!successFlag)
+		{
+			break;
+		}
+
+		message.resize(size);
+
+		for (int i = 0; i < size; i++)
+		{
+			cout << message[i];
+		}
+		cout << endl;
+		ReleaseSemaphore(Semaphores[1], 1, NULL);
+	}
+	CloseHandle(Receiver_COM2);
+	CloseHandle(Semaphores[0]);
+	CloseHandle(Semaphores[1]);
+	return;
+}
+
+int main(int argc, char* argv[])
+{
+	switch (argc)
+	{
+	case 1:																	// Если процесс клиента не создан
+		Server(argv[0]);
+		break;
+	default:
+		Client();
+		break;
+	}
+}
